@@ -1,36 +1,103 @@
-name: Sync and Review WeKnora
+name: Sync and Analyze WeKnora
 
 on:
   schedule:
-    # 每天北京时间6:00 (UTC 22:00)
-    - cron: '0 22 * * *'
-  workflow_dispatch: # 允许手动触发，方便测试
+    - cron: '0 22 * * *' # 每天 UTC 时间晚上 22 点执行（对应北京时间晚上 6 点）
+  workflow_dispatch:    # 允许在 GitHub 网页端手动点击运行测试
 
 jobs:
-  sync_and_review:
+  sync_and_analyze:
     runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    permissions:
+      contents: read # 只需要读取当前仓库
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+    steps:
+      - name: 1. Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+      - name: 2. Install Dependencies
+        run: pip install openai requests
 
-      - name: Run Sync and Review Script
+      - name: 3. Clone Fork Repository
         env:
-          SYNC_PAT: ${{ secrets.SYNC_PAT }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }} # 可选：大模型接口地址
-          MODEL: ${{ secrets.MODEL }}                     # 可选：使用的模型
-          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-          DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
-          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-        run: python sync_and_review.py
+          FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
+        run: |
+          # 克隆 fork 仓库到本地
+          git clone https://altila:${FORK_REPO_TOKEN}@github.com/altila/WeKnora.git weknora-fork
+          cd weknora-fork
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: 4. Fetch Upstream & Analyze & Sync
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          MODEL: ${{ secrets.MODEL }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+          FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
+        run: |
+          cd weknora-fork
+
+          # 添加源仓库为 upstream
+          git remote add upstream https://github.com/Tencent/WeKnora.git
+
+          # 动态检测上游仓库的默认分支
+          echo "检测上游仓库默认分支..."
+          UPSTREAM_DEFAULT_BRANCH=$(git remote show upstream | grep 'HEAD branch' | awk '{print $NF}')
+          if [ -z "$UPSTREAM_DEFAULT_BRANCH" ]; then
+            echo "无法检测默认分支，尝试使用 main..."
+            UPSTREAM_DEFAULT_BRANCH="main"
+          fi
+          echo "上游仓库默认分支: $UPSTREAM_DEFAULT_BRANCH"
+
+          # 获取本地当前分支
+          LOCAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "本地当前分支: $LOCAL_BRANCH"
+
+          # 获取上游更新
+          git fetch upstream $UPSTREAM_DEFAULT_BRANCH
+
+          # 检查上游仓库是否有新提交
+          BEHIND_COUNT=$(git rev-list --count HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH)
+          echo "本地分支落后上游分支 $BEHIND_COUNT 个提交"
+
+          if [ "$BEHIND_COUNT" -gt 0 ]; then
+            echo "发现上游仓库有 $BEHIND_COUNT 个新提交，准备提取差异并分析..."
+
+            # 提取增量 Log 和 Diff（排除锁文件和静态资源以节省 Token）
+            git log HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH --pretty=format:"%h - %s (%an)" > ../.github/new_logs.txt
+            git diff HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH -- . ':(exclude)*.lock' ':(exclude)*.png' ':(exclude)*.md' > ../.github/new_diff.txt
+
+            # 显示提取的信息摘要
+            echo "=== 提交记录摘要 ==="
+            head -20 ../.github/new_logs.txt
+            echo ""
+            echo "=== Diff 文件大小 ==="
+            wc -c ../.github/new_diff.txt
+
+            # 执行 Python 脚本调用大模型分析
+            echo "开始大模型分析..."
+            cd ..
+            python .github/scripts/analyze.py
+            ANALYZE_EXIT_CODE=$?
+            cd weknora-fork
+
+            if [ $ANALYZE_EXIT_CODE -ne 0 ]; then
+              echo "⚠️ 分析脚本执行失败，但仍将继续同步代码..."
+            fi
+
+            # 执行合并，同步代码到本地
+            echo "同步代码..."
+            git merge upstream/$UPSTREAM_DEFAULT_BRANCH -m "Auto-sync from upstream and analyze"
+
+            # 推送更新到 Fork 仓库
+            git push origin $LOCAL_BRANCH
+            echo "✅ 同步并推送成功！"
+          else
+            echo "✅ 上游仓库没有新的更新，跳过分析与同步。"
+            echo "上游仓库没有新的更新，跳过分析与同步。" >> $GITHUB_STEP_SUMMARY
+          fi
