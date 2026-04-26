@@ -13,6 +13,9 @@ FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL")
 DINGTALK_WEBHOOK_URL = os.getenv("DINGTALK_WEBHOOK_URL")
 WECOM_WEBHOOK_URL = os.getenv("WECOM_WEBHOOK_URL")
 
+# 是否有代码更新
+HAS_UPDATE = os.getenv("HAS_UPDATE", "true").lower() == "true"
+
 
 def read_file(filepath):
     """读取文件内容，增强错误处理"""
@@ -27,9 +30,9 @@ def read_file(filepath):
         return None
 
 
-def build_webhook_payload(report, webhook_type):
+def build_webhook_payload(report, webhook_type, has_update=True):
     """根据平台类型构建对应的 webhook payload"""
-    title = "WeKnora 代码更新分析"
+    title = "WeKnora 代码更新分析" if has_update else "WeKnora 同步状态通知"
 
     if webhook_type == "feishu":
         return {
@@ -152,6 +155,34 @@ def main():
     print("=" * 50)
     print("WeKnora 代码更新分析工具")
     print("=" * 50)
+    print(f"📊 代码更新状态: {'有更新' if HAS_UPDATE else '无更新'}")
+
+    # 如果没有更新，直接发送无更新通知
+    if not HAS_UPDATE:
+        report = "✅ 今日上游仓库没有新的代码更新，跳过分析与同步。"
+        print("ℹ️ 没有代码更新，发送无更新通知...")
+
+        # 输出到 GitHub Actions Summary
+        write_github_summary(report)
+
+        # 发送 Webhook 通知
+        print("\n📤 发送 Webhook 通知...")
+        webhook_configs = [
+            (FEISHU_WEBHOOK_URL, "feishu", "飞书"),
+            (DINGTALK_WEBHOOK_URL, "dingtalk", "钉钉"),
+            (WECOM_WEBHOOK_URL, "wecom", "企微"),
+        ]
+
+        success_count = 0
+        for url, webhook_type, name in webhook_configs:
+            if url:
+                payload = build_webhook_payload(report, webhook_type, has_update=False)
+                if send_webhook(url, payload, name):
+                    success_count += 1
+
+        print(f"\n📊 通知发送完成: {success_count}/3 成功")
+        print("=" * 50)
+        return 0
 
     # 读取日志和 diff 文件
     logs = read_file(".github/new_logs.txt")
@@ -193,7 +224,7 @@ def main():
     success_count = 0
     for url, webhook_type, name in webhook_configs:
         if url:
-            payload = build_webhook_payload(report, webhook_type)
+            payload = build_webhook_payload(report, webhook_type, has_update=True)
             if send_webhook(url, payload, name):
                 success_count += 1
 

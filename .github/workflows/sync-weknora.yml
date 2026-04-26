@@ -82,7 +82,7 @@ jobs:
             # 执行 Python 脚本调用大模型分析
             echo "开始大模型分析..."
             cd ..
-            python .github/scripts/analyze.py
+            HAS_UPDATE=true python .github/scripts/analyze.py
             ANALYZE_EXIT_CODE=$?
             cd weknora-fork
 
@@ -98,6 +98,8 @@ jobs:
             git push origin $LOCAL_BRANCH
             echo "✅ 同步并推送成功！"
           else
-            echo "✅ 上游仓库没有新的更新，跳过分析与同步。"
-            echo "上游仓库没有新的更新，跳过分析与同步。" >> $GITHUB_STEP_SUMMARY
+            echo "✅ 上游仓库没有新的更新，发送无更新通知..."
+            cd ..
+            HAS_UPDATE=false python .github/scripts/analyze.py
+            echo "✅ 无更新通知已发送"
           fi
