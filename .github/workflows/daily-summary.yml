@@ -1,0 +1,89 @@
+name: Daily Summary Analysis
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 每天 UTC 时间 0 点执行（对应北京时间早上 8 点）
+  workflow_dispatch:    # 允许手动触发
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  daily_summary:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1 # 只拉取最新代码，加快速度
+
+      - name: 2. Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 3. Install Dependencies
+        run: pip install openai requests
+
+      - name: 4. Run Daily Summary Analysis
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          MODEL: ${{ secrets.MODEL }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+          REPORTS_DIR: reports
+          SAVE_SUMMARY: true
+          GITHUB_STEP_SUMMARY: $GITHUB_STEP_SUMMARY
+        run: python .github/scripts/summarize_daily.py
+
+      - name: 5. Commit and Push Summary Report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📤 提交汇总报告到仓库..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 检查是否有新生成的汇总报告
+          if [ -n "$(git status --porcelain reports/daily-summary/)" ]; then
+            git add reports/daily-summary/
+            git commit -m "📊 Add daily summary report - $(date +%Y-%m-%d)"
+            
+            # 推送重试机制
+            max_retries=3
+            retry_count=0
+            push_success=false
+            
+            while [ $retry_count -lt $max_retries ] && [ "$push_success" = false ]; do
+              echo "🔄 拉取最新代码 (尝试 $((retry_count + 1))/$max_retries)..."
+              if git pull --rebase origin ${{ github.ref_name }}; then
+                echo "✅ 拉取成功，尝试推送..."
+                if git push; then
+                  echo "✅ 汇总报告已提交到仓库"
+                  push_success=true
+                else
+                  echo "⚠️ 推送失败，等待重试..."
+                  retry_count=$((retry_count + 1))
+                  sleep 5
+                fi
+              else
+                echo "⚠️ 拉取失败，等待重试..."
+                retry_count=$((retry_count + 1))
+                sleep 5
+              fi
+            done
+            
+            if [ "$push_success" = false ]; then
+              echo "❌ 推送失败，已达到最大重试次数 ($max_retries)"
+              exit 1
+            fi
+          else
+            echo "ℹ️ 没有新的汇总报告需要提交"
+          fi
