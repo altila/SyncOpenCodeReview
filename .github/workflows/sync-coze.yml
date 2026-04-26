@@ -40,6 +40,7 @@ jobs:
           MODEL: ${{ secrets.MODEL }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
           FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
           REPO_DIR: coze-fork
