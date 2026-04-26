@@ -16,6 +16,9 @@ WECOM_WEBHOOK_URL = os.getenv("WECOM_WEBHOOK_URL")
 # 是否有代码更新
 HAS_UPDATE = os.getenv("HAS_UPDATE", "true").lower() == "true"
 
+# 仓库目录名称
+REPO_DIR = os.getenv("REPO_DIR", "weknora-fork")
+
 
 def read_file(filepath):
     """读取文件内容，增强错误处理"""
@@ -184,9 +187,13 @@ def main():
         print("=" * 50)
         return 0
 
-    # 读取日志和 diff 文件
-    logs = read_file(".github/new_logs.txt")
-    diff = read_file(".github/new_diff.txt")
+    # 读取日志和 diff 文件（支持从 REPO_DIR 子目录读取）
+    logs = read_file(f"{REPO_DIR}/.github/new_logs.txt")
+    if logs is None:
+        logs = read_file(".github/new_logs.txt")
+    diff = read_file(f"{REPO_DIR}/.github/new_diff.txt")
+    if diff is None:
+        diff = read_file(".github/new_diff.txt")
 
     if logs is None or diff is None:
         print("❌ 读取输入文件失败，退出分析")
