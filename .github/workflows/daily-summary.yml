@@ -51,10 +51,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 检查是否有新生成的汇总报告
-          if [ -n "$(git status --porcelain reports/daily-summary/)" ]; then
-            git add reports/daily-summary/
-            git commit -m "📊 Add daily summary report - $(date +%Y-%m-%d)"
+          # 检查是否有新生成的汇总报告或模块报告
+          if [ -n "$(git status --porcelain reports/daily-summary/modules/)" ]; then
+            git add reports/daily-summary/modules/
+            git commit -m "📊 Add daily summary and module reports - $(date +%Y-%m-%d)"
             
             # 推送重试机制
             max_retries=3
