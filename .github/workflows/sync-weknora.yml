@@ -2,14 +2,14 @@ name: Sync and Analyze WeKnora
 
 on:
   schedule:
-    - cron: '0 22 * * *' # 每天 UTC 时间晚上 22 点执行（对应北京时间晚上 6 点）
+    - cron: '0 18 * * *' # 每天 UTC 时间晚上 18 点执行（对应北京时间凌晨 2 点）
   workflow_dispatch:    # 允许在 GitHub 网页端手动点击运行测试
 
 jobs:
   sync_and_analyze:
     runs-on: ubuntu-latest
     permissions:
-      contents: read # 只需要读取当前仓库
+      contents: write # 需要写入权限来提交报告
 
     steps:
       - name: 1. Checkout Repository
@@ -46,6 +46,8 @@ jobs:
           REPO_DIR: weknora-fork
           PROJECT_NAME: WeKnora
           GITHUB_STEP_SUMMARY: $GITHUB_STEP_SUMMARY
+          SAVE_REPORT: true
+          REPORTS_DIR: reports
         run: |
           cd weknora-fork
 
@@ -109,4 +111,22 @@ jobs:
             cd ..
             HAS_UPDATE=false python .github/scripts/analyze.py
             echo "✅ 无更新通知已发送"
+          fi
+
+      - name: 6. Commit and Push Report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📤 提交分析报告到当前仓库..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 检查是否有新生成的报告文件
+          if [ -n "$(git status --porcelain reports/)" ]; then
+            git add reports/
+            git commit -m "📊 Add daily analysis report for WeKnora - $(date +%Y-%m-%d)"
+            git push
+            echo "✅ 报告已提交到仓库"
+          else
+            echo "ℹ️ 没有新的报告需要提交"
           fi

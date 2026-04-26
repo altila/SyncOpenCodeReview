@@ -1,4 +1,4 @@
-name: Sync and Analyze Dify
+name: Sync and Analyze qKnow
 
 on:
   schedule:
@@ -28,8 +28,8 @@ jobs:
           FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
         run: |
           # 克隆 fork 仓库到本地
-          git clone https://altila:${FORK_REPO_TOKEN}@github.com/altila/dify.git dify-fork
-          cd dify-fork
+          git clone https://altila:${FORK_REPO_TOKEN}@github.com/altila/qKnow.git qknow-fork
+          cd qknow-fork
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
@@ -43,16 +43,16 @@ jobs:
           DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
           FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
-          REPO_DIR: dify-fork
-          PROJECT_NAME: Dify
+          REPO_DIR: qknow-fork
+          PROJECT_NAME: qKnow
           GITHUB_STEP_SUMMARY: $GITHUB_STEP_SUMMARY
           SAVE_REPORT: true
           REPORTS_DIR: reports
         run: |
-          cd dify-fork
+          cd qknow-fork
 
           # 添加源仓库为 upstream
-          git remote add upstream https://github.com/langgenius/dify.git
+          git remote add upstream https://github.com/qiantongtech/qKnow.git
 
           # 动态检测上游仓库的默认分支
           echo "检测上游仓库默认分支..."
@@ -93,7 +93,7 @@ jobs:
             cd ..
             HAS_UPDATE=true python .github/scripts/analyze.py
             ANALYZE_EXIT_CODE=$?
-            cd dify-fork
+            cd qknow-fork
 
             if [ $ANALYZE_EXIT_CODE -ne 0 ]; then
               echo "⚠️ 分析脚本执行失败，但仍将继续同步代码..."
@@ -124,7 +124,7 @@ jobs:
           # 检查是否有新生成的报告文件
           if [ -n "$(git status --porcelain reports/)" ]; then
             git add reports/
-            git commit -m "📊 Add daily analysis report for Dify - $(date +%Y-%m-%d)"
+            git commit -m "📊 Add daily analysis report for qKnow - $(date +%Y-%m-%d)"
             git push
             echo "✅ 报告已提交到仓库"
           else

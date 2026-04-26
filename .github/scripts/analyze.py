@@ -6,6 +6,7 @@ import hmac
 import hashlib
 import base64
 import urllib.parse
+from datetime import datetime
 from openai import OpenAI, APIError
 
 # 从环境变量获取配置
@@ -27,6 +28,10 @@ REPO_DIR = os.getenv("REPO_DIR", "weknora-fork")
 
 # 项目名称
 PROJECT_NAME = os.getenv("PROJECT_NAME", "WeKnora")
+
+# 报告保存配置
+SAVE_REPORT = os.getenv("SAVE_REPORT", "true").lower() == "true"
+REPORTS_DIR = os.getenv("REPORTS_DIR", "reports")
 
 
 def read_file(filepath):
@@ -153,11 +158,26 @@ def analyze_code(logs, diff):
     【代码差异】
     {diff}
 
-    请你根据以上信息，输出一份详细的代码迭代报告，必须包含以下两部分：
-    1. **迭代功能总结**：本次更新了哪些核心功能、修复了哪些Bug？
-    2. **优劣与风险分析**：
-       - **优势/亮点**：代码实现上有哪些优秀的实践（如性能提升、架构优化等）。
-       - **劣势/风险**：指出代码中潜在的问题、技术债务、安全隐患或可以优化的地方。
+    请你根据以上信息，输出一份详细的代码迭代报告，必须包含以下三部分：
+
+    1. **迭代功能清单**：
+       - 以表格或列表形式罗列出本次更新的所有功能点
+       - 每个功能点需包含：功能名称、功能描述、相关文件路径（从代码差异中提取具体的文件路径）
+       - 如果是Bug修复，需说明修复的问题和涉及的文件位置
+
+    2. **迭代功能总结**：
+       - 本次更新的核心功能概述
+       - 修复的Bug汇总
+       - 整体影响范围评估
+
+    3. **优劣与风险分析**：
+       - **优势/亮点**：代码实现上有哪些优秀的实践（如性能提升、架构优化等）
+       - **劣势/风险**：指出代码中潜在的问题、技术债务、安全隐患或可以优化的地方
+
+    注意：
+    - 功能清单中的文件路径必须准确，从代码差异的 `+++ b/` 或 `--- a/` 行中提取
+    - 如果涉及多个文件的修改，请逐一列出
+    - 对于新增功能，标注 `[新增]`；对于修复，标注 `[修复]`；对于优化，标注 `[优化]`
     """
 
     try:
@@ -189,6 +209,48 @@ def write_github_summary(report):
             print(f"⚠️ 写入 GitHub Step Summary 失败: {e}")
 
 
+def save_markdown_report(report, has_update=True):
+    """将报告保存为 Markdown 文件到 reports/<project_name>/YYYY-MM-DD.md"""
+    if not SAVE_REPORT:
+        print("ℹ️ 报告保存功能已禁用")
+        return None
+
+    try:
+        # 构建目录路径: reports/<project_name>
+        project_report_dir = os.path.join(REPORTS_DIR, PROJECT_NAME.lower().replace(" ", "-"))
+        os.makedirs(project_report_dir, exist_ok=True)
+
+        # 文件名: YYYY-MM-DD.md
+        today = datetime.now().strftime("%Y-%m-%d")
+        filename = f"{today}.md"
+        filepath = os.path.join(project_report_dir, filename)
+
+        # 构建 Markdown 内容
+        status_text = "代码更新分析" if has_update else "同步状态通知"
+        content = f"""# {PROJECT_NAME} {status_text} - {today}
+
+> 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+---
+
+{report}
+
+---
+
+*本报告由 SyncOpenCodeReview 自动生成*
+"""
+
+        # 写入文件
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        print(f"✅ 报告已保存到: {filepath}")
+        return filepath
+    except Exception as e:
+        print(f"⚠️ 保存 Markdown 报告失败: {e}")
+        return None
+
+
 def main():
     print("=" * 50)
     print(f"{PROJECT_NAME} 代码更新分析工具")
@@ -202,6 +264,10 @@ def main():
 
         # 输出到 GitHub Actions Summary
         write_github_summary(report)
+
+        # 保存 Markdown 报告
+        print("\n💾 保存 Markdown 报告...")
+        save_markdown_report(report, has_update=False)
 
         # 发送 Webhook 通知
         print("\n📤 发送 Webhook 通知...")
@@ -253,6 +319,10 @@ def main():
 
     # 输出到 GitHub Actions Summary
     write_github_summary(report)
+
+    # 保存 Markdown 报告
+    print("\n💾 保存 Markdown 报告...")
+    report_path = save_markdown_report(report, has_update=True)
 
     # 发送 Webhook 通知
     print("\n📤 发送 Webhook 通知...")
