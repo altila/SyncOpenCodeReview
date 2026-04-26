@@ -43,6 +43,7 @@ jobs:
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
           FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
           REPO_DIR: coze-fork
+          PROJECT_NAME: Coze Studio
           GITHUB_STEP_SUMMARY: $GITHUB_STEP_SUMMARY
         run: |
           cd coze-fork

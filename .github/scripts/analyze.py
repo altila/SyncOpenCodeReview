@@ -19,6 +19,9 @@ HAS_UPDATE = os.getenv("HAS_UPDATE", "true").lower() == "true"
 # 仓库目录名称
 REPO_DIR = os.getenv("REPO_DIR", "weknora-fork")
 
+# 项目名称
+PROJECT_NAME = os.getenv("PROJECT_NAME", "WeKnora")
+
 
 def read_file(filepath):
     """读取文件内容，增强错误处理"""
@@ -35,7 +38,7 @@ def read_file(filepath):
 
 def build_webhook_payload(report, webhook_type, has_update=True):
     """根据平台类型构建对应的 webhook payload"""
-    title = "WeKnora 代码更新分析" if has_update else "WeKnora 同步状态通知"
+    title = f"{PROJECT_NAME} 代码更新分析" if has_update else f"{PROJECT_NAME} 同步状态通知"
 
     if webhook_type == "feishu":
         return {
@@ -110,7 +113,7 @@ def analyze_code(logs, diff):
         print(f"⚠️ Diff 长度 ({original_diff_len}) 超过限制，已截断至 {max_chars} 字符")
 
     prompt = f"""
-    你是一个资深的架构师和代码审查专家。以下是腾讯 WeKnora 仓库最新的代码提交记录和代码差异。
+    你是一个资深的架构师和代码审查专家。以下是 {PROJECT_NAME} 仓库最新的代码提交记录和代码差异。
 
     【新增提交记录】
     {logs}
@@ -147,7 +150,7 @@ def write_github_summary(report):
     if step_summary_file:
         try:
             with open(step_summary_file, "a", encoding="utf-8") as f:
-                f.write("## 🤖 WeKnora 每日代码更新与分析报告\n\n")
+                f.write(f"## 🤖 {PROJECT_NAME} 每日代码更新与分析报告\n\n")
                 f.write(report)
             print("✅ 报告已写入 GitHub Step Summary")
         except Exception as e:
@@ -156,7 +159,7 @@ def write_github_summary(report):
 
 def main():
     print("=" * 50)
-    print("WeKnora 代码更新分析工具")
+    print(f"{PROJECT_NAME} 代码更新分析工具")
     print("=" * 50)
     print(f"📊 代码更新状态: {'有更新' if HAS_UPDATE else '无更新'}")
 
