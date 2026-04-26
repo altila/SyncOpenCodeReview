@@ -39,6 +39,8 @@ jobs:
           DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
           FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
+          REPO_DIR: maxkb-fork
+          GITHUB_STEP_SUMMARY: $GITHUB_STEP_SUMMARY
         run: |
           cd maxkb-fork
 
@@ -69,20 +71,20 @@ jobs:
             echo "发现上游仓库有 $BEHIND_COUNT 个新提交，准备提取差异并分析..."
 
             # 提取增量 Log 和 Diff（排除锁文件和静态资源以节省 Token）
-            git log HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH --pretty=format:"%h - %s (%an)" > ../.github/new_logs.txt
-            git diff HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH -- . ':(exclude)*.lock' ':(exclude)*.png' ':(exclude)*.md' > ../.github/new_diff.txt
+            git log HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH --pretty=format:"%h - %s (%an)" > .github/new_logs.txt
+            git diff HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH -- . ':(exclude)*.lock' ':(exclude)*.png' ':(exclude)*.md' > .github/new_diff.txt
 
             # 显示提取的信息摘要
             echo "=== 提交记录摘要 ==="
-            head -20 ../.github/new_logs.txt
+            head -20 .github/new_logs.txt
             echo ""
             echo "=== Diff 文件大小 ==="
-            wc -c ../.github/new_diff.txt
+            wc -c .github/new_diff.txt
 
             # 执行 Python 脚本调用大模型分析
             echo "开始大模型分析..."
             cd ..
-            python .github/scripts/analyze.py
+            HAS_UPDATE=true python .github/scripts/analyze.py
             ANALYZE_EXIT_CODE=$?
             cd maxkb-fork
 
@@ -98,6 +100,8 @@ jobs:
             git push origin $LOCAL_BRANCH
             echo "✅ 同步并推送成功！"
           else
-            echo "✅ 上游仓库没有新的更新，跳过分析与同步。"
-            echo "上游仓库没有新的更新，跳过分析与同步。" >> $GITHUB_STEP_SUMMARY
+            echo "✅ 上游仓库没有新的更新，发送无更新通知..."
+            cd ..
+            HAS_UPDATE=false python .github/scripts/analyze.py
+            echo "✅ 无更新通知已发送"
           fi
