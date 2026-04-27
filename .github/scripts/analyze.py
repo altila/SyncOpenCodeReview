@@ -7,7 +7,8 @@ import hashlib
 import base64
 import urllib.parse
 from datetime import datetime
-from openai import OpenAI, APIError
+from openai import OpenAI, APIError, APIConnectionError, APITimeoutError, AuthenticationError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # 从环境变量获取配置
 LLM_API_KEY = os.getenv("LLM_API_KEY")
@@ -136,6 +137,12 @@ def send_webhook(url, payload, platform_name, secret=None):
         return False
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type((APIConnectionError, APITimeoutError)),
+    before_sleep=lambda retry_state: print(f"🔄 大模型请求失败，正在重试（第 {retry_state.attempt_number}/3 次）...")
+)
 def analyze_code(logs, diff):
     """调用大模型分析代码更新"""
     if not LLM_API_KEY:
@@ -187,14 +194,39 @@ def analyze_code(logs, diff):
         response = client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3
+            temperature=0.3,
+            timeout=60
         )
         return response.choices[0].message.content
+    except APIConnectionError as e:
+        print(f"❌ 大模型 API 连接错误: {e}")
+        print(f"   请求地址: {LLM_BASE_URL}")
+        print(f"   模型: {MODEL}")
+        print(f"   可能原因: 网络不通、IP被封禁、地址配置错误")
+        return None
+    except APITimeoutError as e:
+        print(f"❌ 大模型 API 请求超时: {e}")
+        print(f"   请求地址: {LLM_BASE_URL}")
+        print(f"   超时时间: 60s")
+        return None
+    except AuthenticationError as e:
+        print(f"❌ 大模型 API 认证失败: {e}")
+        print(f"   请检查 LLM_API_KEY 是否正确")
+        return None
     except APIError as e:
-        print(f"❌ 大模型 API 错误: {e}")
+        print(f"❌ 大模型 API 返回错误: {e}")
+        print(f"   状态码: {e.status_code if hasattr(e, 'status_code') else '未知'}")
+        if hasattr(e, 'response') and e.response:
+            try:
+                error_detail = e.response.json()
+                print(f"   错误详情: {error_detail}")
+            except:
+                print(f"   响应内容: {e.response.text[:200]}...")
         return None
     except Exception as e:
-        print(f"❌ 调用大模型时发生错误: {e}")
+        print(f"❌ 调用大模型时发生未知错误: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
