@@ -12,8 +12,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 # 从环境变量获取配置
 LLM_API_KEY = os.getenv("LLM_API_KEY")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://ark.cn-beijing.volces.com/api/coding/v3")
-MODEL = os.environ.get("MODEL", "Kimi-K2.6")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/api/coding/v3"
+MODEL = os.getenv("MODEL") or "Kimi-K2.6"
 
 # Webhook 配置
 FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL")
