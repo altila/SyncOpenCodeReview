@@ -1,20 +1,88 @@
-name: Sync and Analyze LangChain
+name: Sync and Analyze All Repositories
 
 on:
   schedule:
-    - cron: '10 22 * * *' # 每天 UTC 时间晚上 22:10 执行（对应北京时间早上 6:10）
+    - cron: '15 22 * * *' # 每天 UTC 时间晚上 22:15 执行（对应北京时间早上 6:15）
   workflow_dispatch:    # 允许在 GitHub 网页端手动点击运行测试
+    inputs:
+      sync_project:
+        description: '选择要同步的项目，留空则同步所有项目'
+        required: false
+        type: choice
+        options:
+          - all
+          - LangChain
+          - Dify
+          - Coze Studio
+          - AIFlowy
+          - MaxKB
+          - MaxKB4j
+          - qKnow
+          - WeKnora
+        default: 'all'
 
 # 并发控制：防止同一工作流的多个实例同时运行，避免冲突
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+# 公共环境变量配置
+env:
+  LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+  LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+  MODEL: ${{ secrets.MODEL }}
+  FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+  DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+  DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+  WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+  FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
+  SAVE_REPORT: true
+  REPORTS_DIR: reports
+  GITHUB_STEP_SUMMARY: $GITHUB_STEP_SUMMARY
+
 jobs:
   sync_and_analyze:
     runs-on: ubuntu-latest
     permissions:
       contents: write # 需要写入权限来提交报告
+    strategy:
+      max-parallel: 2 # 最多同时执行2个任务，避免并发冲突
+      matrix:
+        repo:
+          - name: LangChain
+            upstream: langchain-ai/langchain
+            fork: altila/langchain
+            dir: langchain-fork
+          - name: Dify
+            upstream: langgenius/dify
+            fork: altila/dify
+            dir: dify-fork
+          - name: Coze Studio
+            upstream: coze-dev/coze-studio
+            fork: altila/coze-studio
+            dir: coze-fork
+          - name: AIFlowy
+            upstream: aiflowy/aiflowy
+            fork: altila/aiflowy
+            dir: aiflowy-fork
+          - name: MaxKB
+            upstream: 1Panel-dev/MaxKB
+            fork: altila/MaxKB
+            dir: maxkb-fork
+          - name: MaxKB4j
+            upstream: taishan666/MaxKB4j
+            fork: altila/MaxKB4j
+            dir: maxkb4j-fork
+          - name: qKnow
+            upstream: qiantongtech/qKnow
+            fork: altila/qKnow
+            dir: qknow-fork
+          - name: WeKnora
+            upstream: Tencent/WeKnora
+            fork: altila/WeKnora
+            dir: weknora-fork
+      # 过滤规则：如果选择了具体项目，只运行选中的，否则运行所有
+      exclude: ${{ inputs.sync_project != 'all' && fromJson(format('[{"name": "LangChain"}, {"name": "Dify"}, {"name": "Coze Studio"}, {"name": "AIFlowy"}, {"name": "MaxKB"}, {"name": "MaxKB4j"}, {"name": "qKnow"}, {"name": "WeKnora"}]')) | rejectattr('name', '==', inputs.sync_project) | list || fromJson('[]') }}
 
     steps:
       - name: 1. Checkout Repository
@@ -25,39 +93,52 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 3. Install Dependencies
+      - name: 3. Cache Python Dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/pip
+            **/__pycache__
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: 4. Install Dependencies
         run: pip install openai requests tenacity
 
-      - name: 4. Clone Fork Repository
-        env:
-          FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
+      - name: 5. Cache Git Repository
+        id: cache-git
+        uses: actions/cache@v3
+        with:
+          path: ${{ matrix.repo.dir }}
+          key: ${{ runner.os }}-git-${{ matrix.repo.dir }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-git-${{ matrix.repo.dir }}-
+
+      - name: 6. Clone Fork Repository
+        if: steps.cache-git.outputs.cache-hit != 'true'
         run: |
           # 克隆 fork 仓库到本地
-          git clone https://altila:${FORK_REPO_TOKEN}@github.com/altila/langchain.git langchain-fork
-          cd langchain-fork
+          git clone https://altila:${{ env.FORK_REPO_TOKEN }}@github.com/${{ matrix.repo.fork }}.git ${{ matrix.repo.dir }}
+          cd ${{ matrix.repo.dir }}
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: 5. Fetch Upstream & Analyze & Sync
-        env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-          MODEL: ${{ secrets.MODEL }}
-          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
-          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
-          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
-          FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
-          REPO_DIR: langchain-fork
-          PROJECT_NAME: LangChain
-          GITHUB_STEP_SUMMARY: $GITHUB_STEP_SUMMARY
-          SAVE_REPORT: true
-          REPORTS_DIR: reports
+          
+      - name: 7. Update Git Repository
+        if: steps.cache-git.outputs.cache-hit == 'true'
         run: |
-          cd langchain-fork
+          cd ${{ matrix.repo.dir }}
+          git fetch origin
+          git reset --hard origin/main
 
-          # 添加源仓库为 upstream
-          git remote add upstream https://github.com/langchain-ai/langchain.git
+      - name: 8. Fetch Upstream & Analyze & Sync
+        run: |
+          cd ${{ matrix.repo.dir }}
+
+          # 添加源仓库为 upstream（如果不存在）
+          if ! git remote | grep -q upstream; then
+            git remote add upstream https://github.com/${{ matrix.repo.upstream }}.git
+          fi
 
           # 动态检测上游仓库的默认分支
           echo "检测上游仓库默认分支..."
@@ -96,9 +177,9 @@ jobs:
             # 执行 Python 脚本调用大模型分析
             echo "开始大模型分析..."
             cd ..
-            HAS_UPDATE=true python .github/scripts/analyze.py
+            HAS_UPDATE=true REPO_DIR=${{ matrix.repo.dir }} PROJECT_NAME="${{ matrix.repo.name }}" python .github/scripts/analyze.py
             ANALYZE_EXIT_CODE=$?
-            cd langchain-fork
+            cd ${{ matrix.repo.dir }}
 
             if [ $ANALYZE_EXIT_CODE -ne 0 ]; then
               echo "⚠️ 分析脚本执行失败，但仍将继续同步代码..."
@@ -114,11 +195,11 @@ jobs:
           else
             echo "✅ 上游仓库没有新的更新，发送无更新通知..."
             cd ..
-            HAS_UPDATE=false python .github/scripts/analyze.py
+            HAS_UPDATE=false REPO_DIR=${{ matrix.repo.dir }} PROJECT_NAME="${{ matrix.repo.name }}" python .github/scripts/analyze.py
             echo "✅ 无更新通知已发送"
           fi
 
-      - name: 6. Commit and Push Report
+      - name: 9. Commit and Push Report
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -129,7 +210,7 @@ jobs:
           # 检查是否有新生成的报告文件
           if [ -n "$(git status --porcelain reports/)" ]; then
             git add reports/
-            git commit -m "📊 Add daily analysis report for LangChain - $(date +%Y-%m-%d)"
+            git commit -m "📊 Add daily analysis report for ${{ matrix.repo.name }} - $(date +%Y-%m-%d)"
 
             # 推送重试机制：防止并发冲突
             max_retries=3
