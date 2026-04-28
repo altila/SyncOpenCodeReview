@@ -45,6 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # 需要写入权限来提交报告
+    if: ${{ inputs.sync_project == 'all' || matrix.repo.name == inputs.sync_project }}
     strategy:
       max-parallel: 2 # 最多同时执行2个任务，避免并发冲突
       matrix:
@@ -81,8 +82,6 @@ jobs:
             upstream: Tencent/WeKnora
             fork: altila/WeKnora
             dir: weknora-fork
-      # 过滤规则：如果选择了具体项目，只运行选中的，否则运行所有
-      exclude: '${{ inputs.sync_project != ''all'' && fromJson(format(''[{"name": "LangChain"}, {"name": "Dify"}, {"name": "Coze Studio"}, {"name": "AIFlowy"}, {"name": "MaxKB"}, {"name": "MaxKB4j"}, {"name": "qKnow"}, {"name": "WeKnora"}]'')) | rejectattr(''name'', ''=='', inputs.sync_project) | list || fromJson(''[]'') }}'
 
     steps:
       - name: 1. Checkout Repository
