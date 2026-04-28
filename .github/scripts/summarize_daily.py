@@ -9,11 +9,15 @@ import urllib.parse
 from datetime import datetime
 from openai import OpenAI, APIError, APIConnectionError, APITimeoutError, AuthenticationError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import google.generativeai as genai
 
 # 从环境变量获取配置
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/api/coding/v3"
 MODEL = os.getenv("MODEL") or "Kimi-K2.6"
+# Gemini模型配置
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-1.5-pro"
 
 # Webhook 配置
 FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL")
@@ -196,10 +200,6 @@ def collect_module_reports(date_str=None):
 )
 def analyze_all_reports(reports):
     """调用大模型汇总分析所有报告"""
-    if not LLM_API_KEY:
-        print("错误: 未设置 LLM_API_KEY 环境变量")
-        return None
-    
     # 构建提示词
     reports_content = ""
     for idx, report in enumerate(reports, 1):
@@ -239,6 +239,33 @@ def analyze_all_reports(reports):
     - 对于重要的功能和问题，可以适当高亮标注
     """
     
+    # 优先使用Gemini模型，如果配置了GEMINI_API_KEY
+    if GEMINI_API_KEY:
+        try:
+            genai.configure(api_key=GEMINI_API_KEY)
+            model = genai.GenerativeModel(GEMINI_MODEL)
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.3,
+                    max_output_tokens=8192
+                ),
+                request_options={"timeout": 60}
+            )
+            return response.text
+        except Exception as e:
+            print(f"❌ 调用Gemini API失败: {type(e).__name__}: {e}")
+            print(f"   模型: {GEMINI_MODEL}")
+            # 如果Gemini调用失败，且配置了OpenAI API Key，则尝试使用OpenAI兼容接口
+            if not LLM_API_KEY:
+                return None
+            print("🔄 尝试使用OpenAI兼容接口...")
+    
+    # 使用OpenAI兼容接口
+    if not LLM_API_KEY:
+        print("错误: 未设置 LLM_API_KEY 或 GEMINI_API_KEY 环境变量")
+        return None
+        
     try:
         client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
         response = client.chat.completions.create(
@@ -288,10 +315,6 @@ def analyze_all_reports(reports):
 )
 def analyze_module_reports(module_name, reports):
     """调用大模型分析单个模块的所有项目报告"""
-    if not LLM_API_KEY:
-        print("错误: 未设置 LLM_API_KEY 环境变量")
-        return None
-    
     # 构建提示词
     reports_content = ""
     for idx, report in enumerate(reports, 1):
@@ -331,6 +354,33 @@ def analyze_module_reports(module_name, reports):
     - 语言简洁明了，结构清晰
     """
     
+    # 优先使用Gemini模型，如果配置了GEMINI_API_KEY
+    if GEMINI_API_KEY:
+        try:
+            genai.configure(api_key=GEMINI_API_KEY)
+            model = genai.GenerativeModel(GEMINI_MODEL)
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.3,
+                    max_output_tokens=8192
+                ),
+                request_options={"timeout": 60}
+            )
+            return response.text
+        except Exception as e:
+            print(f"❌ 调用Gemini API失败: {type(e).__name__}: {e}")
+            print(f"   模型: {GEMINI_MODEL}")
+            # 如果Gemini调用失败，且配置了OpenAI API Key，则尝试使用OpenAI兼容接口
+            if not LLM_API_KEY:
+                return None
+            print("🔄 尝试使用OpenAI兼容接口...")
+    
+    # 使用OpenAI兼容接口
+    if not LLM_API_KEY:
+        print("错误: 未设置 LLM_API_KEY 或 GEMINI_API_KEY 环境变量")
+        return None
+        
     try:
         client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
         response = client.chat.completions.create(

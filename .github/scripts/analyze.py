@@ -9,11 +9,15 @@ import urllib.parse
 from datetime import datetime
 from openai import OpenAI, APIError, APIConnectionError, APITimeoutError, AuthenticationError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import google.generativeai as genai
 
 # 从环境变量获取配置
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/api/coding/v3"
 MODEL = os.getenv("MODEL") or "Kimi-K2.6"
+# Gemini模型配置
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-1.5-pro"
 
 # Webhook 配置
 FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL")
@@ -145,10 +149,6 @@ def send_webhook(url, payload, platform_name, secret=None):
 )
 def analyze_code(logs, diff):
     """调用大模型分析代码更新"""
-    if not LLM_API_KEY:
-        print("错误: 未设置 LLM_API_KEY 环境变量")
-        return None
-
     # 截断过长 Diff，防止超出大模型上下文
     max_chars = 100000
     original_diff_len = len(diff)
@@ -189,6 +189,33 @@ def analyze_code(logs, diff):
       （模块名称请使用简洁的中文名称，最多8个字符，不要包含特殊字符）
     """
 
+    # 优先使用Gemini模型，如果配置了GEMINI_API_KEY
+    if GEMINI_API_KEY:
+        try:
+            genai.configure(api_key=GEMINI_API_KEY)
+            model = genai.GenerativeModel(GEMINI_MODEL)
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.3,
+                    max_output_tokens=8192
+                ),
+                request_options={"timeout": 60}
+            )
+            return response.text
+        except Exception as e:
+            print(f"❌ 调用Gemini API失败: {type(e).__name__}: {e}")
+            print(f"   模型: {GEMINI_MODEL}")
+            # 如果Gemini调用失败，且配置了OpenAI API Key，则尝试使用OpenAI兼容接口
+            if not LLM_API_KEY:
+                return None
+            print("🔄 尝试使用OpenAI兼容接口...")
+    
+    # 使用OpenAI兼容接口
+    if not LLM_API_KEY:
+        print("错误: 未设置 LLM_API_KEY 或 GEMINI_API_KEY 环境变量")
+        return None
+        
     try:
         client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
         response = client.chat.completions.create(
