@@ -1,0 +1,5 @@
+# 代码同步分析系统依赖
+requests>=2.31.0
+openai>=1.3.0
+tenacity>=8.2.3
+pyyaml>=6.0.1

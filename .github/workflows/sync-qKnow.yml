@@ -26,7 +26,7 @@ jobs:
           python-version: '3.10'
 
       - name: 3. Install Dependencies
-        run: pip install openai requests tenacity
+        run: pip install openai requests tenacity google-generativeai
 
       - name: 4. Clone Fork Repository
         env:
