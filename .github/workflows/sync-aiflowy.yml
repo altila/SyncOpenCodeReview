@@ -1,0 +1,165 @@
+name: Sync and Analyze AIFlowy
+
+on:
+  schedule:
+    - cron: '40 22 * * *' # 每天 UTC 时间晚上 22:40 执行（对应北京时间早上 6:40）
+  workflow_dispatch:    # 允许在 GitHub 网页端手动点击运行测试
+
+# 并发控制：防止同一工作流的多个实例同时运行，避免冲突
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync_and_analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 需要写入权限来提交报告
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 3. Install Dependencies
+        run: pip install openai requests tenacity
+
+      - name: 4. Clone Fork Repository
+        env:
+          FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
+        run: |
+          # 克隆 fork 仓库到本地
+          git clone https://altila:${FORK_REPO_TOKEN}@github.com/altila/aiflowy.git aiflowy-fork
+          cd aiflowy-fork
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: 5. Fetch Upstream & Analyze & Sync
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          MODEL: ${{ secrets.MODEL }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+          FORK_REPO_TOKEN: ${{ secrets.FORK_REPO_TOKEN }}
+          REPO_DIR: aiflowy-fork
+          PROJECT_NAME: AIFlowy
+          GITHUB_STEP_SUMMARY: $GITHUB_STEP_SUMMARY
+          SAVE_REPORT: true
+          REPORTS_DIR: reports
+        run: |
+          cd aiflowy-fork
+
+          # 添加源仓库为 upstream
+          git remote add upstream https://github.com/aiflowy/aiflowy.git
+
+          # 动态检测上游仓库的默认分支
+          echo "检测上游仓库默认分支..."
+          UPSTREAM_DEFAULT_BRANCH=$(git remote show upstream | grep 'HEAD branch' | awk '{print $NF}')
+          if [ -z "$UPSTREAM_DEFAULT_BRANCH" ]; then
+            echo "无法检测默认分支，尝试使用 main..."
+            UPSTREAM_DEFAULT_BRANCH="main"
+          fi
+          echo "上游仓库默认分支: $UPSTREAM_DEFAULT_BRANCH"
+
+          # 获取本地当前分支
+          LOCAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "本地当前分支: $LOCAL_BRANCH"
+
+          # 获取上游更新
+          git fetch upstream $UPSTREAM_DEFAULT_BRANCH
+
+          # 检查上游仓库是否有新提交
+          BEHIND_COUNT=$(git rev-list --count HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH)
+          echo "本地分支落后上游分支 $BEHIND_COUNT 个提交"
+
+          if [ "$BEHIND_COUNT" -gt 0 ]; then
+            echo "发现上游仓库有 $BEHIND_COUNT 个新提交，准备提取差异并分析..."
+
+            # 提取增量 Log 和 Diff（排除锁文件和静态资源以节省 Token）
+            git log HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH --pretty=format:"%h - %s (%an)" > .github/new_logs.txt
+            git diff HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH -- . ':(exclude)*.lock' ':(exclude)*.png' ':(exclude)*.md' > .github/new_diff.txt
+
+            # 显示提取的信息摘要
+            echo "=== 提交记录摘要 ==="
+            head -20 .github/new_logs.txt
+            echo ""
+            echo "=== Diff 文件大小 ==="
+            wc -c .github/new_diff.txt
+
+            # 执行 Python 脚本调用大模型分析
+            echo "开始大模型分析..."
+            cd ..
+            HAS_UPDATE=true python .github/scripts/analyze.py
+            ANALYZE_EXIT_CODE=$?
+            cd aiflowy-fork
+
+            if [ $ANALYZE_EXIT_CODE -ne 0 ]; then
+              echo "⚠️ 分析脚本执行失败，但仍将继续同步代码..."
+            fi
+
+            # 执行合并，同步代码到本地
+            echo "同步代码..."
+            git merge upstream/$UPSTREAM_DEFAULT_BRANCH -m "Auto-sync from upstream and analyze"
+
+            # 推送更新到 Fork 仓库
+            git push origin $LOCAL_BRANCH
+            echo "✅ 同步并推送成功！"
+          else
+            echo "✅ 上游仓库没有新的更新，发送无更新通知..."
+            cd ..
+            HAS_UPDATE=false python .github/scripts/analyze.py
+            echo "✅ 无更新通知已发送"
+          fi
+
+      - name: 6. Commit and Push Report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📤 提交分析报告到当前仓库..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 检查是否有新生成的报告文件
+          if [ -n "$(git status --porcelain reports/)" ]; then
+            git add reports/
+            git commit -m "📊 Add daily analysis report for AIFlowy - $(date +%Y-%m-%d)"
+
+            # 推送重试机制：防止并发冲突
+            max_retries=3
+            retry_count=0
+            push_success=false
+
+            while [ $retry_count -lt $max_retries ] && [ "$push_success" = false ]; do
+              # 先拉取最新代码，避免冲突
+              echo "🔄 拉取最新代码 (尝试 $((retry_count + 1))/$max_retries)..."
+              if git pull --rebase origin ${{ github.ref_name }}; then
+                echo "✅ 拉取成功，尝试推送..."
+                if git push; then
+                  echo "✅ 报告已提交到仓库"
+                  push_success=true
+                else
+                  echo "⚠️ 推送失败，等待重试..."
+                  retry_count=$((retry_count + 1))
+                  sleep 5
+                fi
+              else
+                echo "⚠️ 拉取失败，等待重试..."
+                retry_count=$((retry_count + 1))
+                sleep 5
+              fi
+            done
+
+            if [ "$push_success" = false ]; then
+              echo "❌ 推送失败，已达到最大重试次数 ($max_retries)"
+              exit 1
+            fi
+          else
+            echo "ℹ️ 没有新的报告需要提交"
+          fi
