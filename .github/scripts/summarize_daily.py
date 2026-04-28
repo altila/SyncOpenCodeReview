@@ -7,18 +7,13 @@ import hashlib
 import base64
 import urllib.parse
 from datetime import datetime
+from openai import OpenAI, APIError, APIConnectionError, APITimeoutError, AuthenticationError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-# 导入公共LLM工具
-from llm_utils import call_llm
-from llm_config import SUPPORTED_LLM_TYPES, DEFAULT_LLM_TYPE
-
-# 从环境变量获取配置，没有的话从配置文件获取默认值
-LLM_TYPE = os.getenv("LLM_TYPE", DEFAULT_LLM_TYPE).lower()
-# 校验LLM类型是否支持
-if LLM_TYPE not in SUPPORTED_LLM_TYPES:
-    print(f"❌ 不支持的LLM类型: {LLM_TYPE}")
-    print(f"   支持的类型: {', '.join(SUPPORTED_LLM_TYPES)}")
-    sys.exit(1)
+# 从环境变量获取配置
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/api/coding/v3"
+MODEL = os.getenv("MODEL") or "Kimi-K2.6"
 
 # Webhook 配置
 FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL")
@@ -193,8 +188,18 @@ def collect_module_reports(date_str=None):
     return module_reports
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type((APIConnectionError, APITimeoutError)),
+    before_sleep=lambda retry_state: print(f"🔄 全项目汇总分析请求失败，正在重试（第 {retry_state.attempt_number}/3 次）...")
+)
 def analyze_all_reports(reports):
     """调用大模型汇总分析所有报告"""
+    if not LLM_API_KEY:
+        print("错误: 未设置 LLM_API_KEY 环境变量")
+        return None
+    
     # 构建提示词
     reports_content = ""
     for idx, report in enumerate(reports, 1):
@@ -234,11 +239,59 @@ def analyze_all_reports(reports):
     - 对于重要的功能和问题，可以适当高亮标注
     """
     
-    return call_llm(prompt, llm_type=LLM_TYPE, temperature=0.3, timeout=60)
+    try:
+        client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            timeout=60
+        )
+        return response.choices[0].message.content
+    except APIConnectionError as e:
+        print(f"❌ 大模型 API 连接错误: {e}")
+        print(f"   请求地址: {LLM_BASE_URL}")
+        print(f"   模型: {MODEL}")
+        print(f"   可能原因: 网络不通、IP被封禁、地址配置错误")
+        return None
+    except APITimeoutError as e:
+        print(f"❌ 大模型 API 请求超时: {e}")
+        print(f"   请求地址: {LLM_BASE_URL}")
+        print(f"   超时时间: 60s")
+        return None
+    except AuthenticationError as e:
+        print(f"❌ 大模型 API 认证失败: {e}")
+        print(f"   请检查 LLM_API_KEY 是否正确")
+        return None
+    except APIError as e:
+        print(f"❌ 大模型 API 返回错误: {e}")
+        print(f"   状态码: {e.status_code if hasattr(e, 'status_code') else '未知'}")
+        if hasattr(e, 'response') and e.response:
+            try:
+                error_detail = e.response.json()
+                print(f"   错误详情: {error_detail}")
+            except:
+                print(f"   响应内容: {e.response.text[:200]}...")
+        return None
+    except Exception as e:
+        print(f"❌ 调用大模型时发生未知错误: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type((APIConnectionError, APITimeoutError)),
+    before_sleep=lambda retry_state: print(f"🔄 {retry_state.args[0]} 模块分析请求失败，正在重试（第 {retry_state.attempt_number}/3 次）...")
+)
 def analyze_module_reports(module_name, reports):
     """调用大模型分析单个模块的所有项目报告"""
+    if not LLM_API_KEY:
+        print("错误: 未设置 LLM_API_KEY 环境变量")
+        return None
+    
     # 构建提示词
     reports_content = ""
     for idx, report in enumerate(reports, 1):
@@ -278,7 +331,45 @@ def analyze_module_reports(module_name, reports):
     - 语言简洁明了，结构清晰
     """
     
-    return call_llm(prompt, llm_type=LLM_TYPE, temperature=0.3, timeout=60)
+    try:
+        client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            timeout=60
+        )
+        return response.choices[0].message.content
+    except APIConnectionError as e:
+        print(f"❌ 分析 {module_name} 模块时 API 连接错误: {e}")
+        print(f"   请求地址: {LLM_BASE_URL}")
+        print(f"   模型: {MODEL}")
+        print(f"   可能原因: 网络不通、IP被封禁、地址配置错误")
+        return None
+    except APITimeoutError as e:
+        print(f"❌ 分析 {module_name} 模块时 API 请求超时: {e}")
+        print(f"   请求地址: {LLM_BASE_URL}")
+        print(f"   超时时间: 60s")
+        return None
+    except AuthenticationError as e:
+        print(f"❌ 分析 {module_name} 模块时 API 认证失败: {e}")
+        print(f"   请检查 LLM_API_KEY 是否正确")
+        return None
+    except APIError as e:
+        print(f"❌ 分析 {module_name} 模块时 API 返回错误: {e}")
+        print(f"   状态码: {e.status_code if hasattr(e, 'status_code') else '未知'}")
+        if hasattr(e, 'response') and e.response:
+            try:
+                error_detail = e.response.json()
+                print(f"   错误详情: {error_detail}")
+            except:
+                print(f"   响应内容: {e.response.text[:200]}...")
+        return None
+    except Exception as e:
+        print(f"❌ 分析 {module_name} 模块时发生未知错误: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 def save_summary_report(summary_content, date_str=None):

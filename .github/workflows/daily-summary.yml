@@ -2,7 +2,7 @@ name: Daily Summary Analysis
 
 on:
   schedule:
-    - cron: '0 2 * * *' # 每天 UTC 时间 2 点执行（对应北京时间早上 10 点，确保所有同步任务完成）
+    - cron: '0 0 * * *' # 每天 UTC 时间 0 点执行（对应北京时间早上 8 点）
   workflow_dispatch:    # 允许手动触发
 
 concurrency:
@@ -26,17 +26,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 3. Cache Python Dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/pip
-            **/__pycache__
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: 4. Install Dependencies
+      - name: 3. Install Dependencies
         run: pip install openai requests tenacity
 
       - name: 4. Run Daily Summary Analysis
