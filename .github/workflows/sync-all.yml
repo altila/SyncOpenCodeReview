@@ -81,8 +81,6 @@ jobs:
             upstream: Tencent/WeKnora
             fork: altila/WeKnora
             dir: weknora-fork
-        # 过滤规则：如果选择了具体项目，只运行选中的，否则运行所有
-        exclude: ${{ inputs.sync_project != 'all' && fromJson('[{"name": "LangChain"}, {"name": "Dify"}, {"name": "Coze Studio"}, {"name": "AIFlowy"}, {"name": "MaxKB"}, {"name": "MaxKB4j"}, {"name": "qKnow"}, {"name": "WeKnora"}]') | rejectattr('name', '==', inputs.sync_project) | list || [] }}
 
     steps:
       - name: 1. Checkout Repository
