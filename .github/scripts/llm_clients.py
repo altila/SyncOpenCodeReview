@@ -127,8 +127,7 @@ class GeminiClient(BaseModelClient):
                 config={
                     "temperature": temperature,
                     "max_output_tokens": max_output_tokens
-                },
-                timeout=timeout
+                }
             )
             return response.text
         except Exception as e:
