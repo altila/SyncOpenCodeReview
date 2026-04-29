@@ -37,7 +37,7 @@ LLM_CONFIGS = {
     },
     "gemini": {
         "default_base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "default_model": "gemini-1.5-pro",
+        "default_model": "gemini-3-flash-preview",
         "description": "谷歌Google Gemini大模型"
     }
 }

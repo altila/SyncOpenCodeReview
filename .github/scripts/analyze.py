@@ -7,17 +7,213 @@ import hashlib
 import base64
 import urllib.parse
 from datetime import datetime
+from abc import ABC, abstractmethod
+from typing import Optional, Dict, Any
 from openai import OpenAI, APIError, APIConnectionError, APITimeoutError, AuthenticationError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-import google.genai as genai
 
-# 从环境变量获取配置
-LLM_API_KEY = os.getenv("LLM_API_KEY")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/api/coding/v3"
-MODEL = os.getenv("MODEL") or "Kimi-K2.6"
-# Gemini模型配置
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-flash-latest"
+# 尝试导入 google-genai，如果失败则给出友好提示
+try:
+    import google.genai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+    print("⚠️ 警告: google-genai 库未安装，Gemini 模型将不可用")
+    print("   安装命令: pip install google-genai")
+
+# ==================== 配置管理 ====================
+
+class ModelConfig:
+    """模型配置类"""
+    def __init__(self):
+        # 火山引擎配置 (OpenAI 兼容接口)
+        self.volc_api_key = os.getenv("LLM_API_KEY")
+        self.volc_base_url = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/api/coding/v3"
+        self.volc_model = os.getenv("MODEL") or "Kimi-K2.6"
+        
+        # Gemini 配置
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
+        self.gemini_model = os.getenv("GEMINI_MODEL") or "gemini-flash-latest"
+        
+        # 模型优先级配置
+        self.preferred_provider = os.getenv("PREFERRED_PROVIDER", "auto").lower()
+        # auto: 自动选择 (优先 Gemini -> 火山)
+        # gemini: 强制使用 Gemini
+        # volc: 强制使用火山引擎
+    
+    def get_active_provider(self) -> str:
+        """获取当前激活的模型提供商"""
+        if self.preferred_provider == "gemini":
+            return "gemini" if self.gemini_api_key else ("volc" if self.volc_api_key else None)
+        elif self.preferred_provider == "volc":
+            return "volc" if self.volc_api_key else ("gemini" if self.gemini_api_key else None)
+        else:  # auto
+            if self.gemini_api_key and GENAI_AVAILABLE:
+                return "gemini"
+            elif self.volc_api_key:
+                return "volc"
+            return None
+
+
+# ==================== 模型接口抽象 ====================
+
+class BaseModelClient(ABC):
+    """模型客户端抽象基类"""
+    
+    @abstractmethod
+    def generate(self, prompt: str, **kwargs) -> Optional[str]:
+        """生成文本"""
+        pass
+    
+    @abstractmethod
+    def get_model_info(self) -> Dict[str, str]:
+        """获取模型信息"""
+        pass
+
+
+class VolcEngineClient(BaseModelClient):
+    """火山引擎模型客户端 (OpenAI 兼容)"""
+    
+    def __init__(self, api_key: str, base_url: str, model: str):
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model = model
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type((APIConnectionError, APITimeoutError)),
+        before_sleep=lambda retry_state: print(f"🔄 火山引擎请求失败，正在重试（第 {retry_state.attempt_number}/3 次）...")
+    )
+    def generate(self, prompt: str, temperature: float = 0.3, timeout: int = 60, **kwargs) -> Optional[str]:
+        """调用火山引擎模型"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                timeout=timeout
+            )
+            return response.choices[0].message.content
+        except APIConnectionError as e:
+            print(f"❌ 火山引擎 API 连接错误: {e}")
+            print(f"   请求地址: {self.base_url}")
+            print(f"   可能原因: 网络不通、IP被封禁、地址配置错误")
+            raise
+        except APITimeoutError as e:
+            print(f"❌ 火山引擎 API 请求超时: {e}")
+            raise
+        except AuthenticationError as e:
+            print(f"❌ 火山引擎 API 认证失败: {e}")
+            print(f"   请检查 LLM_API_KEY 是否正确")
+            return None
+        except APIError as e:
+            print(f"❌ 火山引擎 API 返回错误: {e}")
+            if hasattr(e, 'status_code'):
+                print(f"   状态码: {e.status_code}")
+            if hasattr(e, 'response') and e.response:
+                try:
+                    error_detail = e.response.json()
+                    print(f"   错误详情: {error_detail}")
+                except:
+                    print(f"   响应内容: {e.response.text[:200]}...")
+            return None
+        except Exception as e:
+            print(f"❌ 调用火山引擎时发生未知错误: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def get_model_info(self) -> Dict[str, str]:
+        return {
+            "provider": "火山引擎",
+            "model": self.model,
+            "base_url": self.base_url
+        }
+
+
+class GeminiClient(BaseModelClient):
+    """Gemini 模型客户端"""
+    
+    def __init__(self, api_key: str, model: str):
+        if not GENAI_AVAILABLE:
+            raise ImportError("google-genai 库未安装，无法使用 Gemini 模型")
+        self.api_key = api_key
+        self.model = model
+        self.client = genai.Client(api_key=api_key)
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type((Exception,)),
+        before_sleep=lambda retry_state: print(f"🔄 Gemini 请求失败，正在重试（第 {retry_state.attempt_number}/3 次）...")
+    )
+    def generate(self, prompt: str, temperature: float = 0.3, max_output_tokens: int = 8192, 
+                 timeout: int = 60, **kwargs) -> Optional[str]:
+        """调用 Gemini 模型"""
+        try:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config={
+                    "temperature": temperature,
+                    "max_output_tokens": max_output_tokens
+                },
+                request_options={"timeout": timeout}
+            )
+            return response.text
+        except Exception as e:
+            error_msg = str(e)
+            print(f"❌ Gemini API 错误: {type(e).__name__}: {e}")
+            
+            # 特定错误处理
+            if "401" in error_msg or "AuthenticationError" in error_msg or "API key format is incorrect" in error_msg:
+                print(f"   请检查 GEMINI_API_KEY 是否正确")
+                return None
+            elif "404" in error_msg or "NotFound" in error_msg or "is not found for API version" in error_msg:
+                print(f"   请检查 GEMINI_MODEL 是否正确")
+                print(f"   支持的模型: gemini-flash-latest, gemini-2.0-flash, gemini-1.5-flash 等")
+                return None
+            elif "429" in error_msg or "RateLimit" in error_msg:
+                print(f"   请求频率超限，请稍后重试")
+                raise
+            else:
+                raise
+    
+    def get_model_info(self) -> Dict[str, str]:
+        return {
+            "provider": "Google Gemini",
+            "model": self.model,
+            "base_url": "https://generativelanguage.googleapis.com"
+        }
+
+
+# ==================== 模型工厂 ====================
+
+class ModelFactory:
+    """模型工厂类"""
+    
+    @staticmethod
+    def create_client(config: ModelConfig) -> Optional[BaseModelClient]:
+        """根据配置创建模型客户端"""
+        provider = config.get_active_provider()
+        
+        if provider == "gemini":
+            print(f"🤖 使用模型: Google Gemini ({config.gemini_model})")
+            return GeminiClient(config.gemini_api_key, config.gemini_model)
+        elif provider == "volc":
+            print(f"🤖 使用模型: 火山引擎 ({config.volc_model})")
+            return VolcEngineClient(config.volc_api_key, config.volc_base_url, config.volc_model)
+        else:
+            print("❌ 错误: 未配置任何有效的模型 API Key")
+            print("   请设置以下环境变量之一:")
+            print("   - GEMINI_API_KEY: 用于 Google Gemini 模型")
+            print("   - LLM_API_KEY: 用于火山引擎模型")
+            return None
+
+
+# ==================== 其他配置 ====================
 
 # Webhook 配置
 FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL")
@@ -38,6 +234,8 @@ PROJECT_NAME = os.getenv("PROJECT_NAME", "WeKnora")
 SAVE_REPORT = os.getenv("SAVE_REPORT", "true").lower() == "true"
 REPORTS_DIR = os.getenv("REPORTS_DIR", "reports")
 
+
+# ==================== 工具函数 ====================
 
 def read_file(filepath):
     """读取文件内容，增强错误处理"""
@@ -66,7 +264,7 @@ def build_dingtalk_sign(secret):
 def build_webhook_payload(report, webhook_type, has_update=True):
     """根据平台类型构建对应的 webhook payload"""
     title = f"{PROJECT_NAME} 代码更新分析" if has_update else f"{PROJECT_NAME} 同步状态通知"
-
+    
     if webhook_type == "feishu":
         return {
             "msg_type": "post",
@@ -141,13 +339,7 @@ def send_webhook(url, payload, platform_name, secret=None):
         return False
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((APIConnectionError, APITimeoutError)),
-    before_sleep=lambda retry_state: print(f"🔄 大模型请求失败，正在重试（第 {retry_state.attempt_number}/3 次）...")
-)
-def analyze_code(logs, diff):
+def analyze_code(logs, diff, model_client: BaseModelClient):
     """调用大模型分析代码更新"""
     # 截断过长 Diff，防止超出大模型上下文
     max_chars = 100000
@@ -188,81 +380,9 @@ def analyze_code(logs, diff):
     - 如果涉及多个功能模块，请在每个完整的模块内容前添加分隔标记：`---模块分隔：[模块名称]---`
       （模块名称请使用简洁的中文名称，最多8个字符，不要包含特殊字符）
     """
-
-    # 优先使用Gemini模型，如果配置了GEMINI_API_KEY
-    if GEMINI_API_KEY:
-        try:
-            # 新版google-genai SDK使用Client对象模式，不再支持configure方法
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config={
-                    "temperature": 0.3,
-                    "max_output_tokens": 8192
-                },
-                request_options={"timeout": 60}
-            )
-            return response.text
-        except Exception as e:
-            print(f"❌ 调用Gemini API失败: {type(e).__name__}: {e}")
-            print(f"   模型: {GEMINI_MODEL}")
-            # 检查是否是认证错误
-            if "401" in str(e) or "AuthenticationError" in str(e) or "API key format is incorrect" in str(e):
-                print(f"   请检查 GEMINI_API_KEY 是否正确")
-            # 检查是否是模型不存在错误
-            if "404" in str(e) or "NotFound" in str(e) or "is not found for API version" in str(e):
-                print(f"   请检查 GEMINI_MODEL 是否正确，支持的模型包括：gemini-flash-latest、gemini-2.0-flash、gemini-1.5-flash等")
-                print(f"   可以通过配置 GitHub Secrets 的 GEMINI_MODEL 变量来切换模型版本")
-            # 如果Gemini调用失败，且配置了OpenAI API Key，则尝试使用OpenAI兼容接口
-            if not LLM_API_KEY:
-                return None
-            print("🔄 尝试使用OpenAI兼容接口...")
     
-    # 使用OpenAI兼容接口
-    if not LLM_API_KEY:
-        print("错误: 未设置 LLM_API_KEY 或 GEMINI_API_KEY 环境变量")
-        return None
-        
-    try:
-        client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            timeout=60
-        )
-        return response.choices[0].message.content
-    except APIConnectionError as e:
-        print(f"❌ 大模型 API 连接错误: {e}")
-        print(f"   请求地址: {LLM_BASE_URL}")
-        print(f"   模型: {MODEL}")
-        print(f"   可能原因: 网络不通、IP被封禁、地址配置错误")
-        return None
-    except APITimeoutError as e:
-        print(f"❌ 大模型 API 请求超时: {e}")
-        print(f"   请求地址: {LLM_BASE_URL}")
-        print(f"   超时时间: 60s")
-        return None
-    except AuthenticationError as e:
-        print(f"❌ 大模型 API 认证失败: {e}")
-        print(f"   请检查 LLM_API_KEY 是否正确")
-        return None
-    except APIError as e:
-        print(f"❌ 大模型 API 返回错误: {e}")
-        print(f"   状态码: {e.status_code if hasattr(e, 'status_code') else '未知'}")
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_detail = e.response.json()
-                print(f"   错误详情: {error_detail}")
-            except:
-                print(f"   响应内容: {e.response.text[:200]}...")
-        return None
-    except Exception as e:
-        print(f"❌ 调用大模型时发生未知错误: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+    # 使用模型客户端生成内容
+    return model_client.generate(prompt, temperature=0.3, timeout=60)
 
 
 def write_github_summary(report):
@@ -414,7 +534,19 @@ def main():
     print(f"{PROJECT_NAME} 代码更新分析工具")
     print("=" * 50)
     print(f"📊 代码更新状态: {'有更新' if HAS_UPDATE else '无更新'}")
-
+    
+    # 初始化配置
+    config = ModelConfig()
+    
+    # 检查模型配置
+    active_provider = config.get_active_provider()
+    if not active_provider:
+        print("❌ 错误: 未配置任何有效的模型")
+        print("   请设置 GEMINI_API_KEY 或 LLM_API_KEY 环境变量")
+        return 1
+    
+    print(f"🔧 模型提供商: {active_provider}")
+    
     # 如果没有更新，直接发送无更新通知
     if not HAS_UPDATE:
         report = "✅ 今日上游仓库没有新的代码更新，跳过分析与同步。"
@@ -464,10 +596,19 @@ def main():
 
     print(f"📄 读取到 {len(logs)} 字符的提交记录")
     print(f"📄 读取到 {len(diff)} 字符的代码差异")
-
+    
+    # 创建模型客户端
+    model_client = ModelFactory.create_client(config)
+    if not model_client:
+        return 1
+    
+    model_info = model_client.get_model_info()
+    print(f"   提供商: {model_info['provider']}")
+    print(f"   模型: {model_info['model']}")
+    
     # 调用大模型分析
     print("\n🤖 开始调用大模型分析...")
-    report = analyze_code(logs, diff)
+    report = analyze_code(logs, diff, model_client)
 
     if not report:
         print("❌ 分析失败，无法生成报告")
