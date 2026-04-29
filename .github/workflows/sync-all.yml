@@ -32,7 +32,7 @@ env:
   LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
   MODEL: ${{ secrets.MODEL }}
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-  GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+
   FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
   DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
   DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}

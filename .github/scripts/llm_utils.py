@@ -195,7 +195,7 @@ class ModelConfig:
         
         # Gemini 配置
         self.gemini_api_key = os.getenv("GEMINI_API_KEY")
-        self.gemini_model = os.getenv("GEMINI_MODEL") or "gemini-flash-latest"
+        self.gemini_model = os.getenv("GEMINI_MODEL") or LLM_CONFIGS["gemini"]["default_model"]
         
         # 模型优先级配置
         self.preferred_provider = os.getenv("PREFERRED_PROVIDER", "auto").lower()

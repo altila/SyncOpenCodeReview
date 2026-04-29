@@ -27,13 +27,14 @@ jobs:
           python-version: '3.10'
 
       - name: 3. Install Dependencies
-        run: pip install openai requests tenacity google-generativeai
+        run: pip install openai requests tenacity google-genai
 
       - name: 4. Run Daily Summary Analysis
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           MODEL: ${{ secrets.MODEL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
           DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
