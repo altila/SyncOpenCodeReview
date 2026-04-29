@@ -9,7 +9,7 @@ import urllib.parse
 from datetime import datetime
 from openai import OpenAI, APIError, APIConnectionError, APITimeoutError, AuthenticationError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-import google.generativeai as genai
+import google.genai as genai
 
 # 从环境变量获取配置
 LLM_API_KEY = os.getenv("LLM_API_KEY")
@@ -17,7 +17,7 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/a
 MODEL = os.getenv("MODEL") or "Kimi-K2.6"
 # Gemini模型配置
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-1.5-pro"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-2.0-flash"
 
 # Webhook 配置
 FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL")
@@ -209,6 +209,10 @@ def analyze_code(logs, diff):
             # 检查是否是认证错误
             if "401" in str(e) or "AuthenticationError" in str(e) or "API key format is incorrect" in str(e):
                 print(f"   请检查 GEMINI_API_KEY 是否正确")
+            # 检查是否是模型不存在错误
+            if "404" in str(e) or "NotFound" in str(e) or "is not found for API version" in str(e):
+                print(f"   请检查 GEMINI_MODEL 是否正确，支持的模型包括：gemini-2.0-flash、gemini-1.5-flash、gemini-1.5-pro等")
+                print(f"   可以通过配置 GitHub Secrets 的 GEMINI_MODEL 变量来切换模型版本")
             # 如果Gemini调用失败，且配置了OpenAI API Key，则尝试使用OpenAI兼容接口
             if not LLM_API_KEY:
                 return None
