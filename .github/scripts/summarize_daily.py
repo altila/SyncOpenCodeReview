@@ -237,10 +237,10 @@ def save_module_summary(module_name, module_content, date_str=None):
         date_str = datetime.now().strftime("%Y-%m-%d")
     
     try:
-        module_dir = os.path.join(REPORTS_DIR, "modules", module_name.replace(" ", "-").lower())
+        module_dir = os.path.join(REPORTS_DIR, "daily-summary", module_name.replace(" ", "-").lower())
         os.makedirs(module_dir, exist_ok=True)
         
-        filename = f"{date_str}-{module_name.replace(' ', '-')}.md"
+        filename = f"{date_str}.md"
         filepath = os.path.join(module_dir, filename)
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
