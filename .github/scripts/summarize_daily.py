@@ -1,22 +1,13 @@
 import os
 import sys
-import requests
-import time
-import hmac
-import hashlib
-import base64
-import urllib.parse
 from datetime import datetime
 
 # 导入通用LLM模块
 from llm_utils import ModelConfig, ModelFactory, BaseModelClient
 from llm_clients import GENAI_AVAILABLE
 
-# Webhook 配置
-FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL")
-DINGTALK_WEBHOOK_URL = os.getenv("DINGTALK_WEBHOOK_URL")
-DINGTALK_SECRET = os.getenv("DINGTALK_SECRET")
-WECOM_WEBHOOK_URL = os.getenv("WECOM_WEBHOOK_URL")
+# 导入公共Webhook模块
+from webhook_utils import send_all_webhooks
 
 # 报告目录配置
 REPORTS_DIR = os.getenv("REPORTS_DIR", "reports")
@@ -33,87 +24,7 @@ def read_file(filepath):
         return None
 
 
-def build_dingtalk_sign(secret):
-    """生成钉钉加签"""
-    timestamp = str(round(time.time() * 1000))
-    secret_enc = secret.encode('utf-8')
-    string_to_sign = f"{timestamp}\n{secret}"
-    string_to_sign_enc = string_to_sign.encode('utf-8')
-    hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
-    sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
-    return timestamp, sign
 
-
-def build_webhook_payload(report, webhook_type):
-    """根据平台类型构建对应的 webhook payload"""
-    title = "📊 每日全项目代码更新汇总分析"
-
-    if webhook_type == "feishu":
-        return {
-            "msg_type": "post",
-            "content": {
-                "post": {
-                    "zh_cn": {
-                        "title": title,
-                        "content": [[{"tag": "text", "text": report}]]
-                    }
-                }
-            }
-        }
-    elif webhook_type == "dingtalk":
-        return {
-            "msgtype": "markdown",
-            "markdown": {
-                "title": title,
-                "text": f"## {title}\n\n{report}"
-            }
-        }
-    elif webhook_type == "wecom":
-        return {
-            "msgtype": "markdown",
-            "markdown": {
-                "content": f"## {title}\n\n{report}"
-            }
-        }
-    else:
-        return {
-            "msg_type": "post",
-            "content": {
-                "post": {
-                    "zh_cn": {
-                        "title": title,
-                        "content": [[{"tag": "text", "text": report}]]
-                    }
-                }
-            }
-        }
-
-
-def send_webhook(url, payload, platform_name, secret=None):
-    """发送 webhook 通知"""
-    if not url:
-        print(f"ℹ️ {platform_name} Webhook URL 未配置，跳过")
-        return True
-
-    try:
-        if platform_name == "钉钉" and secret:
-            timestamp, sign = build_dingtalk_sign(secret)
-            url = f"{url}&timestamp={timestamp}&sign={sign}"
-
-        resp = requests.post(url, json=payload, timeout=30)
-        resp.raise_for_status()
-
-        if platform_name == "钉钉":
-            result = resp.json()
-            if result.get("errcode") != 0:
-                print(f"⚠️ {platform_name} Webhook 推送失败: {result.get('errmsg')}")
-                return False
-
-        print(f"✅ {platform_name} Webhook 推送成功！")
-        return True
-    except Exception as e:
-        print(f"⚠️ {platform_name} Webhook 推送失败: {e}")
-        return False
 
 
 def collect_daily_reports(date_str=None):
@@ -450,19 +361,8 @@ def main():
     
     # 发送 Webhook 通知（保持原有的全项目汇总通知不变）
     print("\n📤 发送全项目汇总通知...")
-    webhook_configs = [
-        (FEISHU_WEBHOOK_URL, "feishu", "飞书", None),
-        (DINGTALK_WEBHOOK_URL, "dingtalk", "钉钉", DINGTALK_SECRET),
-        (WECOM_WEBHOOK_URL, "wecom", "企微", None),
-    ]
-    
-    success_count = 0
-    for url, webhook_type, name, secret in webhook_configs:
-        if url:
-            payload = build_webhook_payload(summary_report, webhook_type)
-            if send_webhook(url, payload, name, secret):
-                success_count += 1
-    
+    success_count = send_all_webhooks(summary_report, title="📊 每日全项目代码更新汇总分析")
+
     print(f"\n📊 通知发送完成: {success_count}/3 成功")
     print("=" * 60)
     
