@@ -7,17 +7,10 @@ import hashlib
 import base64
 import urllib.parse
 from datetime import datetime
-from openai import OpenAI, APIError, APIConnectionError, APITimeoutError, AuthenticationError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-import google.generativeai as genai
 
-# 从环境变量获取配置
-LLM_API_KEY = os.getenv("LLM_API_KEY")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/api/coding/v3"
-MODEL = os.getenv("MODEL") or "Kimi-K2.6"
-# Gemini模型配置
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-1.5-pro"
+# 导入通用LLM模块
+from llm_utils import ModelConfig, ModelFactory, BaseModelClient
+from llm_clients import GENAI_AVAILABLE
 
 # Webhook 配置
 FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL")
@@ -192,13 +185,7 @@ def collect_module_reports(date_str=None):
     return module_reports
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((APIConnectionError, APITimeoutError)),
-    before_sleep=lambda retry_state: print(f"🔄 全项目汇总分析请求失败，正在重试（第 {retry_state.attempt_number}/3 次）...")
-)
-def analyze_all_reports(reports):
+def analyze_all_reports(reports, model_client: BaseModelClient):
     """调用大模型汇总分析所有报告"""
     # 构建提示词
     reports_content = ""
@@ -239,81 +226,11 @@ def analyze_all_reports(reports):
     - 对于重要的功能和问题，可以适当高亮标注
     """
     
-    # 优先使用Gemini模型，如果配置了GEMINI_API_KEY
-    if GEMINI_API_KEY:
-        try:
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel(GEMINI_MODEL)
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.3,
-                    max_output_tokens=8192
-                ),
-                request_options={"timeout": 60}
-            )
-            return response.text
-        except Exception as e:
-            print(f"❌ 调用Gemini API失败: {type(e).__name__}: {e}")
-            print(f"   模型: {GEMINI_MODEL}")
-            # 如果Gemini调用失败，且配置了OpenAI API Key，则尝试使用OpenAI兼容接口
-            if not LLM_API_KEY:
-                return None
-            print("🔄 尝试使用OpenAI兼容接口...")
-    
-    # 使用OpenAI兼容接口
-    if not LLM_API_KEY:
-        print("错误: 未设置 LLM_API_KEY 或 GEMINI_API_KEY 环境变量")
-        return None
-        
-    try:
-        client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            timeout=60
-        )
-        return response.choices[0].message.content
-    except APIConnectionError as e:
-        print(f"❌ 大模型 API 连接错误: {e}")
-        print(f"   请求地址: {LLM_BASE_URL}")
-        print(f"   模型: {MODEL}")
-        print(f"   可能原因: 网络不通、IP被封禁、地址配置错误")
-        return None
-    except APITimeoutError as e:
-        print(f"❌ 大模型 API 请求超时: {e}")
-        print(f"   请求地址: {LLM_BASE_URL}")
-        print(f"   超时时间: 60s")
-        return None
-    except AuthenticationError as e:
-        print(f"❌ 大模型 API 认证失败: {e}")
-        print(f"   请检查 LLM_API_KEY 是否正确")
-        return None
-    except APIError as e:
-        print(f"❌ 大模型 API 返回错误: {e}")
-        print(f"   状态码: {e.status_code if hasattr(e, 'status_code') else '未知'}")
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_detail = e.response.json()
-                print(f"   错误详情: {error_detail}")
-            except:
-                print(f"   响应内容: {e.response.text[:200]}...")
-        return None
-    except Exception as e:
-        print(f"❌ 调用大模型时发生未知错误: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+    # 使用模型客户端生成内容
+    return model_client.generate(prompt, temperature=0.3, timeout=120)
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((APIConnectionError, APITimeoutError)),
-    before_sleep=lambda retry_state: print(f"🔄 {retry_state.args[0]} 模块分析请求失败，正在重试（第 {retry_state.attempt_number}/3 次）...")
-)
-def analyze_module_reports(module_name, reports):
+def analyze_module_reports(module_name, reports, model_client: BaseModelClient):
     """调用大模型分析单个模块的所有项目报告"""
     # 构建提示词
     reports_content = ""
@@ -354,72 +271,8 @@ def analyze_module_reports(module_name, reports):
     - 语言简洁明了，结构清晰
     """
     
-    # 优先使用Gemini模型，如果配置了GEMINI_API_KEY
-    if GEMINI_API_KEY:
-        try:
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel(GEMINI_MODEL)
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.3,
-                    max_output_tokens=8192
-                ),
-                request_options={"timeout": 60}
-            )
-            return response.text
-        except Exception as e:
-            print(f"❌ 调用Gemini API失败: {type(e).__name__}: {e}")
-            print(f"   模型: {GEMINI_MODEL}")
-            # 如果Gemini调用失败，且配置了OpenAI API Key，则尝试使用OpenAI兼容接口
-            if not LLM_API_KEY:
-                return None
-            print("🔄 尝试使用OpenAI兼容接口...")
-    
-    # 使用OpenAI兼容接口
-    if not LLM_API_KEY:
-        print("错误: 未设置 LLM_API_KEY 或 GEMINI_API_KEY 环境变量")
-        return None
-        
-    try:
-        client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            timeout=60
-        )
-        return response.choices[0].message.content
-    except APIConnectionError as e:
-        print(f"❌ 分析 {module_name} 模块时 API 连接错误: {e}")
-        print(f"   请求地址: {LLM_BASE_URL}")
-        print(f"   模型: {MODEL}")
-        print(f"   可能原因: 网络不通、IP被封禁、地址配置错误")
-        return None
-    except APITimeoutError as e:
-        print(f"❌ 分析 {module_name} 模块时 API 请求超时: {e}")
-        print(f"   请求地址: {LLM_BASE_URL}")
-        print(f"   超时时间: 60s")
-        return None
-    except AuthenticationError as e:
-        print(f"❌ 分析 {module_name} 模块时 API 认证失败: {e}")
-        print(f"   请检查 LLM_API_KEY 是否正确")
-        return None
-    except APIError as e:
-        print(f"❌ 分析 {module_name} 模块时 API 返回错误: {e}")
-        print(f"   状态码: {e.status_code if hasattr(e, 'status_code') else '未知'}")
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_detail = e.response.json()
-                print(f"   错误详情: {error_detail}")
-            except:
-                print(f"   响应内容: {e.response.text[:200]}...")
-        return None
-    except Exception as e:
-        print(f"❌ 分析 {module_name} 模块时发生未知错误: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+    # 使用模型客户端生成内容
+    return model_client.generate(prompt, temperature=0.3, timeout=120)
 
 
 def save_summary_report(summary_content, date_str=None):
@@ -522,6 +375,18 @@ def main():
     print("📊 每日全项目代码更新汇总分析工具")
     print("=" * 60)
     
+    # 初始化配置
+    config = ModelConfig()
+    
+    # 检查模型配置
+    active_provider = config.get_active_provider()
+    if not active_provider:
+        print("❌ 错误: 未配置任何有效的模型")
+        print("   请设置 GEMINI_API_KEY 或 LLM_API_KEY 环境变量")
+        return 1
+    
+    print(f"🔧 模型提供商: {active_provider}")
+    
     # 收集当天的所有报告
     today = datetime.now().strftime("%Y-%m-%d")
     print(f"\n📂 开始收集 {today} 的所有项目报告...")
@@ -533,9 +398,18 @@ def main():
     
     print(f"✅ 共收集到 {len(reports)} 个项目的报告")
     
+    # 创建模型客户端
+    model_client = ModelFactory.create_client(config)
+    if not model_client:
+        return 1
+    
+    model_info = model_client.get_model_info()
+    print(f"   提供商: {model_info['provider']}")
+    print(f"   模型: {model_info['model']}")
+    
     # 调用大模型汇总分析（全项目）
     print("\n🤖 开始汇总分析所有项目报告...")
-    summary_report = analyze_all_reports(reports)
+    summary_report = analyze_all_reports(reports, model_client)
     
     if not summary_report:
         print("❌ 全项目汇总分析失败")
@@ -560,7 +434,7 @@ def main():
         module_success_count = 0
         for module_name, module_reports_list in module_reports.items():
             print(f"\n🤖 分析 {module_name} 模块 ({len(module_reports_list)} 个项目)...")
-            module_summary = analyze_module_reports(module_name, module_reports_list)
+            module_summary = analyze_module_reports(module_name, module_reports_list, model_client)
             
             if module_summary:
                 save_module_summary(module_name, module_summary, today)
