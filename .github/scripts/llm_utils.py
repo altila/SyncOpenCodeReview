@@ -3,11 +3,12 @@ LLM 调用公共工具类
 提供统一的大模型调用接口，支持多种LLM类型和自动降级机制
 """
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from openai import OpenAI, APIError, APIConnectionError, APITimeoutError, AuthenticationError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from llm_config import LLM_CONFIGS, SUPPORTED_LLM_TYPES
+from llm_clients import BaseModelClient, OpenAIClient, VolcEngineClient, GeminiClient, GENAI_AVAILABLE
 
 
 def get_llm_config(llm_type):
@@ -182,4 +183,79 @@ def call_llm(prompt: str, llm_type: Optional[str] = None, temperature: float = 0
     # 所有LLM都失败
     print("❌ 所有LLM都调用失败，无法完成分析")
     return None
+
+
+class ModelConfig:
+    """模型配置类"""
+    def __init__(self):
+        # 火山引擎配置 (OpenAI 兼容接口)
+        self.volc_api_key = os.getenv("LLM_API_KEY")
+        self.volc_base_url = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/api/coding/v3"
+        self.volc_model = os.getenv("MODEL") or "Kimi-K2.6"
+        
+        # Gemini 配置
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
+        self.gemini_model = os.getenv("GEMINI_MODEL") or "gemini-flash-latest"
+        
+        # 模型优先级配置
+        self.preferred_provider = os.getenv("PREFERRED_PROVIDER", "auto").lower()
+        # auto: 自动选择 (优先 Gemini -> 火山)
+        # gemini: 强制使用 Gemini
+        # volc: 强制使用火山引擎
+    
+    def get_active_provider(self) -> str:
+        """获取当前激活的模型提供商"""
+        if self.preferred_provider == "gemini":
+            return "gemini" if self.gemini_api_key else ("volc" if self.volc_api_key else None)
+        elif self.preferred_provider == "volc":
+            return "volc" if self.volc_api_key else ("gemini" if self.gemini_api_key else None)
+        else:  # auto
+            if self.gemini_api_key and GENAI_AVAILABLE:
+                return "gemini"
+            elif self.volc_api_key:
+                return "volc"
+            return None
+
+
+class ModelFactory:
+    """模型工厂类"""
+    
+    @staticmethod
+    def create_client(config: ModelConfig) -> Optional[BaseModelClient]:
+        """根据配置创建模型客户端"""
+        provider = config.get_active_provider()
+        
+        if provider == "gemini":
+            print(f"🤖 使用模型: Google Gemini ({config.gemini_model})")
+            return GeminiClient(config.gemini_api_key, config.gemini_model)
+        elif provider == "volc":
+            print(f"🤖 使用模型: 火山引擎 ({config.volc_model})")
+            return VolcEngineClient(config.volc_api_key, config.volc_base_url, config.volc_model)
+        else:
+            print("❌ 错误: 未配置任何有效的模型 API Key")
+            print("   请设置以下环境变量之一:")
+            print("   - GEMINI_API_KEY: 用于 Google Gemini 模型")
+            print("   - LLM_API_KEY: 用于火山引擎模型")
+            return None
+    
+    @staticmethod
+    def create_client_by_type(llm_type: str) -> Optional[BaseModelClient]:
+        """根据LLM类型创建客户端（兼容现有通用LLM配置）"""
+        config = get_llm_config(llm_type)
+        if not config:
+            return None
+            
+        if llm_type == "gemini" and GENAI_AVAILABLE and config.get("api_key"):
+            # Gemini优先使用官方SDK
+            return GeminiClient(config["api_key"], config["model"])
+        else:
+            # 其他LLM使用OpenAI兼容客户端
+            provider_name = LLM_CONFIGS[llm_type]["description"] if llm_type in LLM_CONFIGS else llm_type.upper()
+            return OpenAIClient(
+                api_key=config["api_key"],
+                base_url=config["base_url"],
+                model=config["model"],
+                provider_name=provider_name
+            )
+
 
