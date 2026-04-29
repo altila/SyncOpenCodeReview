@@ -133,7 +133,7 @@ class GeminiClient(BaseModelClient):
         except Exception as e:
             error_msg = str(e)
             print(f"❌ Gemini API 错误: {type(e).__name__}: {e}")
-            
+
             # 特定错误处理
             if "401" in error_msg or "AuthenticationError" in error_msg or "API key format is incorrect" in error_msg:
                 print(f"   请检查 GEMINI_API_KEY 是否正确")
@@ -142,9 +142,9 @@ class GeminiClient(BaseModelClient):
                 print(f"   请检查 GEMINI_MODEL 是否正确")
                 print(f"   支持的模型: gemini-flash-latest, gemini-2.0-flash, gemini-1.5-flash 等")
                 return None
-            elif "429" in error_msg or "RateLimit" in error_msg:
-                print(f"   请求频率超限，请稍后重试")
-                raise
+            elif "429" in error_msg or "RateLimit" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                print(f"   请求频率超限或配额已用完，跳过当前请求")
+                return None
             else:
                 raise
     

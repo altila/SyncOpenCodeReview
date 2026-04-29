@@ -321,51 +321,50 @@ def main():
     # 调用大模型汇总分析（全项目）
     print("\n🤖 开始汇总分析所有项目报告...")
     summary_report = analyze_all_reports(reports, model_client)
-    
+
     if not summary_report:
-        print("❌ 全项目汇总分析失败")
-        return 1
-    
-    print("✅ 全项目汇总分析完成")
-    
-    # 写入 GitHub Summary
-    write_github_summary(summary_report)
-    
-    # 保存全项目汇总报告
-    print("\n💾 保存全项目汇总报告...")
-    save_summary_report(summary_report, today)
-    
+        print("❌ 全项目汇总分析失败，跳过汇总报告生成")
+    else:
+        print("✅ 全项目汇总分析完成")
+
+        # 写入 GitHub Summary
+        write_github_summary(summary_report)
+
+        # 保存全项目汇总报告
+        print("\n💾 保存全项目汇总报告...")
+        save_summary_report(summary_report, today)
+
+        # 发送 Webhook 通知（保持原有的全项目汇总通知不变）
+        print("\n📤 发送全项目汇总通知...")
+        success_count = send_all_webhooks(summary_report, title="📊 每日全项目代码更新汇总分析")
+        print(f"\n📊 通知发送完成: {success_count}/3 成功")
+
     # ========== 新增：按功能模块汇总 ==========
     print("\n📦 开始按功能模块汇总分析...")
     module_reports = collect_module_reports(today)
-    
+
     if module_reports:
         print(f"✅ 共发现 {len(module_reports)} 个功能模块有更新")
-        
+
         module_success_count = 0
         for module_name, module_reports_list in module_reports.items():
             print(f"\n🤖 分析 {module_name} 模块 ({len(module_reports_list)} 个项目)...")
             module_summary = analyze_module_reports(module_name, module_reports_list, model_client)
-            
+
             if module_summary:
                 save_module_summary(module_name, module_summary, today)
                 module_success_count += 1
                 print(f"✅ {module_name} 模块分析完成")
             else:
-                print(f"⚠️ {module_name} 模块分析失败")
-        
+                print(f"⚠️ {module_name} 模块分析失败，跳过该模块")
+
         print(f"\n📊 模块分析完成: {module_success_count}/{len(module_reports)} 成功")
     else:
         print("ℹ️ 今日没有发现任何功能模块报告，跳过模块汇总")
     # ==========================================
-    
-    # 发送 Webhook 通知（保持原有的全项目汇总通知不变）
-    print("\n📤 发送全项目汇总通知...")
-    success_count = send_all_webhooks(summary_report, title="📊 每日全项目代码更新汇总分析")
 
-    print(f"\n📊 通知发送完成: {success_count}/3 成功")
     print("=" * 60)
-    
+
     return 0
 
 
