@@ -206,6 +206,9 @@ def analyze_code(logs, diff):
         except Exception as e:
             print(f"❌ 调用Gemini API失败: {type(e).__name__}: {e}")
             print(f"   模型: {GEMINI_MODEL}")
+            # 检查是否是认证错误
+            if "401" in str(e) or "AuthenticationError" in str(e) or "API key format is incorrect" in str(e):
+                print(f"   请检查 GEMINI_API_KEY 是否正确")
             # 如果Gemini调用失败，且配置了OpenAI API Key，则尝试使用OpenAI兼容接口
             if not LLM_API_KEY:
                 return None
