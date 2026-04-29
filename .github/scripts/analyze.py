@@ -138,19 +138,18 @@ def split_report_by_module(full_report):
 def save_markdown_report(report, has_update=True):
     """将报告保存为 Markdown 文件到 reports/<project_name>/
     有更新时：
-    - 保存一份完整的汇总报告：YYYY-MM-DD-汇总.md
-    - 如果有模块分隔标记，额外按模块保存多份报告：YYYY-MM-DD-模块名称.md
+    - 保存一份完整的汇总报告到：reports/<project_name>/汇总/YYYY-MM-DD.md
+    - 如果有模块分隔标记，额外按模块保存多份报告到：reports/<project_name>/<模块名称>/YYYY-MM-DD.md
     无更新时：
-    - 保存无更新报告：YYYY-MM-DD-无更新.md
+    - 保存无更新报告到：reports/<project_name>/无更新/YYYY-MM-DD.md
     """
     if not SAVE_REPORT:
         print("ℹ️ 报告保存功能已禁用")
         return None
 
     try:
-        # 构建目录路径: reports/<project_name>
-        project_report_dir = os.path.join(REPORTS_DIR, PROJECT_NAME.lower().replace(" ", "-"))
-        os.makedirs(project_report_dir, exist_ok=True)
+        # 基础目录路径: reports/<project_name>
+        project_base_dir = os.path.join(REPORTS_DIR, PROJECT_NAME.lower().replace(" ", "-"))
 
         today = datetime.now().strftime("%Y-%m-%d")
         current_exec_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -158,10 +157,12 @@ def save_markdown_report(report, has_update=True):
         batch_separator = f"\n\n{'='*80}\n===== 执行批次：{current_exec_time} =====\n{'='*80}\n\n"
         saved_files = []
 
-        # 无更新时直接保存无更新报告
+        # 无更新时直接保存无更新报告到：项目/无更新/日期
         if not has_update:
-            filename = f"{today}-无更新.md"
-            filepath = os.path.join(project_report_dir, filename)
+            no_update_dir = os.path.join(project_base_dir, "无更新")
+            os.makedirs(no_update_dir, exist_ok=True)
+            filename = f"{today}.md"
+            filepath = os.path.join(no_update_dir, filename)
             status_text = "同步状态通知"
             content = batch_separator + f"""# {PROJECT_NAME} {status_text} - {today}
 
@@ -181,9 +182,11 @@ def save_markdown_report(report, has_update=True):
             saved_files.append(filepath)
             return saved_files
 
-        # 有更新时，先保存汇总报告
-        summary_filename = f"{today}-汇总.md"
-        summary_filepath = os.path.join(project_report_dir, summary_filename)
+        # 有更新时，先保存汇总报告到：项目/汇总/日期
+        summary_dir = os.path.join(project_base_dir, "汇总")
+        os.makedirs(summary_dir, exist_ok=True)
+        summary_filename = f"{today}.md"
+        summary_filepath = os.path.join(summary_dir, summary_filename)
         status_text = "代码更新分析"
         summary_content = batch_separator + f"""# {PROJECT_NAME} {status_text} - {today}
 
@@ -209,8 +212,11 @@ def save_markdown_report(report, has_update=True):
             for module_name, module_content in modules.items():
                 # 清理模块名称中的空格，替换为短横线
                 clean_module_name = module_name.replace(" ", "-")
-                module_filename = f"{today}-{clean_module_name}.md"
-                module_filepath = os.path.join(project_report_dir, module_filename)
+                # 模块报告保存到：项目/<模块名称>/日期
+                module_dir = os.path.join(project_base_dir, clean_module_name)
+                os.makedirs(module_dir, exist_ok=True)
+                module_filename = f"{today}.md"
+                module_filepath = os.path.join(module_dir, module_filename)
                 module_full_content = batch_separator + f"""# {PROJECT_NAME} {module_name} 模块更新分析 - {today}
 
 > 生成时间: {current_exec_time}
