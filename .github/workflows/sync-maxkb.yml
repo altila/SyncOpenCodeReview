@@ -84,6 +84,9 @@ jobs:
           if [ "$BEHIND_COUNT" -gt 0 ]; then
             echo "发现上游仓库有 $BEHIND_COUNT 个新提交，准备提取差异并分析..."
 
+            # 确保 .github 目录存在
+            mkdir -p .github
+
             # 提取增量 Log 和 Diff（排除锁文件和静态资源以节省 Token）
             git log HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH --pretty=format:"%h - %s (%an)" > .github/new_logs.txt
             git diff HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH -- . ':(exclude)*.lock' ':(exclude)*.png' ':(exclude)*.md' > .github/new_diff.txt
