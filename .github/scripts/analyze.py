@@ -17,7 +17,7 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/a
 MODEL = os.getenv("MODEL") or "Kimi-K2.6"
 # Gemini模型配置
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-2.0-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-flash-latest"
 
 # Webhook 配置
 FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL")
@@ -192,14 +192,15 @@ def analyze_code(logs, diff):
     # 优先使用Gemini模型，如果配置了GEMINI_API_KEY
     if GEMINI_API_KEY:
         try:
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel(GEMINI_MODEL)
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.3,
-                    max_output_tokens=8192
-                ),
+            # 新版google-genai SDK使用Client对象模式，不再支持configure方法
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config={
+                    "temperature": 0.3,
+                    "max_output_tokens": 8192
+                },
                 request_options={"timeout": 60}
             )
             return response.text
@@ -211,7 +212,7 @@ def analyze_code(logs, diff):
                 print(f"   请检查 GEMINI_API_KEY 是否正确")
             # 检查是否是模型不存在错误
             if "404" in str(e) or "NotFound" in str(e) or "is not found for API version" in str(e):
-                print(f"   请检查 GEMINI_MODEL 是否正确，支持的模型包括：gemini-2.0-flash、gemini-1.5-flash、gemini-1.5-pro等")
+                print(f"   请检查 GEMINI_MODEL 是否正确，支持的模型包括：gemini-flash-latest、gemini-2.0-flash、gemini-1.5-flash等")
                 print(f"   可以通过配置 GitHub Secrets 的 GEMINI_MODEL 变量来切换模型版本")
             # 如果Gemini调用失败，且配置了OpenAI API Key，则尝试使用OpenAI兼容接口
             if not LLM_API_KEY:
