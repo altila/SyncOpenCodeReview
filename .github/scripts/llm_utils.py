@@ -190,8 +190,8 @@ class ModelConfig:
     def __init__(self):
         # 火山引擎配置 (OpenAI 兼容接口)
         self.volc_api_key = os.getenv("LLM_API_KEY")
-        self.volc_base_url = os.getenv("LLM_BASE_URL") or "https://ark.cn-beijing.volces.com/api/coding/v3"
-        self.volc_model = os.getenv("MODEL") or "Kimi-K2.6"
+        self.volc_base_url = os.getenv("LLM_BASE_URL") or LLM_CONFIGS["kimi"]["default_base_url"]
+        self.volc_model = os.getenv("MODEL") or LLM_CONFIGS["kimi"]["default_model"]
         
         # Gemini 配置
         self.gemini_api_key = os.getenv("GEMINI_API_KEY")
